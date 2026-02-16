@@ -251,7 +251,14 @@
 const SUPABASE_URL = 'https://ylovbipfqhaktgqzifsx.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsb3ZiaXBmcWhha3RncXppZnN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEyNjQ0NjMsImV4cCI6MjA4Njg0MDQ2M30.-pL09_2YqgfqV-oHOn3eqVL7GIQKy9qOzbB5VV74gbE';
 
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+let supabaseClient;
+try {
+  supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+} catch (e) {
+  document.getElementById('lastUpdate').textContent = 'Error: Supabase library failed to load';
+  console.error('Supabase init error:', e);
+}
+const supabase = supabaseClient;
 
 let allAlerts = [];
 const container = document.getElementById('alertsContainer');
@@ -413,7 +420,7 @@ async function loadAlerts() {
 
   if (error) {
     console.error('Load error:', error);
-    lastUpdate.textContent = 'Error loading';
+    lastUpdate.textContent = 'Error: ' + (error.message || JSON.stringify(error));
     return;
   }
 
@@ -471,7 +478,16 @@ document.getElementById('filterTicker').addEventListener('input', renderAll);
 document.getElementById('filterDate').addEventListener('change', renderAll);
 
 // Init
-loadAlerts().then(() => subscribeRealtime());
+if (supabase) {
+  loadAlerts()
+    .then(() => subscribeRealtime())
+    .catch(e => {
+      console.error('Init error:', e);
+      lastUpdate.textContent = 'Error: ' + e.message;
+    });
+} else {
+  lastUpdate.textContent = 'Error: Supabase not loaded — check console';
+}
 </script>
 </body>
 </html>
