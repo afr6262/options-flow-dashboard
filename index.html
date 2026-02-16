@@ -179,13 +179,14 @@
     grid-template-columns: 48px 72px 70px 1fr 80px 90px 100px 100px 80px 70px;
     gap: 0;
     padding: 0 24px;
-    border-bottom: 1px solid #1e2329;
+    border-bottom: 1px solid #181a1f;
     align-items: center;
-    min-height: 44px;
+    min-height: 38px;
     transition: background 0.15s;
     animation: fadeIn 0.25s ease-out;
   }
 
+  .flow-row:nth-child(even) { background: rgba(30, 35, 41, 0.3); }
   .flow-row:hover { background: #1e2329; }
 
   .flow-row.new-row {
@@ -193,17 +194,13 @@
     border-bottom-color: rgba(240, 185, 11, 0.2);
   }
 
-  /* Call rows get subtle green left accent, put rows get red */
-  .flow-row.is-call { border-left: 3px solid #0ecb81; }
-  .flow-row.is-put { border-left: 3px solid #f6465d; }
-
   @keyframes fadeIn {
     from { opacity: 0; }
     to { opacity: 1; }
   }
 
   .flow-row .cell {
-    padding: 10px 6px;
+    padding: 7px 6px;
     font-size: 13px;
     white-space: nowrap;
     overflow: hidden;
@@ -274,11 +271,25 @@
     vertical-align: middle;
   }
 
-  /* Direction */
-  .cell-dir { text-align: right; font-weight: 600; font-size: 12px; }
-  .dir-buy { color: #0ecb81; }
-  .dir-sell { color: #f6465d; }
-  .dir-neutral { color: #474d57; }
+  /* Direction — solid color blocks like UW */
+  .cell-dir {
+    text-align: center;
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    padding: 4px 0 !important;
+  }
+
+  .cell-dir .dir-pill {
+    display: inline-block;
+    padding: 3px 12px;
+    border-radius: 3px;
+    min-width: 48px;
+  }
+
+  .dir-buy .dir-pill { background: #0ecb81; color: #000; }
+  .dir-sell .dir-pill { background: #f6465d; color: #fff; }
+  .dir-neutral .dir-pill { background: #2b3139; color: #474d57; }
 
   /* Numeric cells */
   .cell-num {
@@ -498,7 +509,7 @@ function renderRow(row, isNew) {
       <span class="contract-strike">${strike} ${stock}</span>
       <span class="contract-expiry">${expiry}</span>
     </div>
-    <div class="cell cell-dir ${dirClass(row.direction)}">${dirLabel(row.direction)}</div>
+    <div class="cell cell-dir ${dirClass(row.direction)}"><span class="dir-pill">${dirLabel(row.direction)}</span></div>
     <div class="cell cell-num">${fmtNum(row.volume)}</div>
     <div class="cell cell-num">${row.premium != null ? '$' + Number(row.premium).toFixed(2) : '—'}</div>
     <div class="cell cell-num">${fmtCurrency(row.notional)}</div>
