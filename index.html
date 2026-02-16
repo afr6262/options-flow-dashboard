@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Options Flow Scanner</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0a0a0f;
+    color: #e0e0e0;
+    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-size: 13px;
+    overflow-x: hidden;
+  }
+
+  .header {
+    background: #111118;
+    border-bottom: 1px solid #2a2a3a;
+    padding: 12px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .header h1 {
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    letter-spacing: 1px;
+  }
+
+  .header .status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: #888;
+  }
+
+  .status .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #444;
+    transition: background 0.3s;
+  }
+
+  .status .dot.connected { background: #00c853; box-shadow: 0 0 6px #00c853; }
+  .status .dot.flash { background: #ffab00; box-shadow: 0 0 8px #ffab00; }
+
+  .filters {
+    background: #111118;
+    border-bottom: 1px solid #2a2a3a;
+    padding: 8px 20px;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    font-size: 12px;
+  }
+
+  .filters label { color: #888; }
+
+  .filters select, .filters input {
+    background: #1a1a25;
+    border: 1px solid #2a2a3a;
+    color: #e0e0e0;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 12px;
+  }
+
+  .stats {
+    background: #111118;
+    border-bottom: 1px solid #2a2a3a;
+    padding: 8px 20px;
+    display: flex;
+    gap: 24px;
+    font-size: 12px;
+    color: #888;
+  }
+
+  .stats .stat-val { color: #fff; font-weight: 600; }
+
+  .alerts-container {
+    padding: 8px 12px;
+  }
+
+  .alert-row {
+    background: #111118;
+    border: 1px solid #1a1a2a;
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-bottom: 6px;
+    display: grid;
+    grid-template-columns: 40px 70px 1fr 90px 90px 80px 80px 70px;
+    align-items: center;
+    gap: 10px;
+    transition: background 0.2s, border-color 0.3s;
+    animation: slideIn 0.3s ease-out;
+  }
+
+  .alert-row:hover { background: #161625; }
+  .alert-row.new-alert { border-color: #ffab00; }
+  .alert-row.score-high { border-left: 3px solid #ff3d00; }
+  .alert-row.score-mid { border-left: 3px solid #ffab00; }
+  .alert-row.score-low { border-left: 3px solid #2196f3; }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .alert-score {
+    font-weight: 700;
+    font-size: 16px;
+    text-align: center;
+  }
+
+  .score-high .alert-score { color: #ff3d00; }
+  .score-mid .alert-score { color: #ffab00; }
+  .score-low .alert-score { color: #2196f3; }
+
+  .alert-ticker {
+    font-weight: 700;
+    font-size: 14px;
+    color: #fff;
+  }
+
+  .alert-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .alert-type {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .type-sweep { color: #e040fb; }
+  .type-block { color: #448aff; }
+  .type-put { color: #ff5252; }
+  .type-unusual { color: #ffab00; }
+  .type-other { color: #69f0ae; }
+
+  .alert-contract {
+    color: #aaa;
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .alert-dir {
+    font-size: 11px;
+    text-align: center;
+  }
+
+  .dir-buyer { color: #00c853; }
+  .dir-seller { color: #ff1744; }
+  .dir-unknown { color: #555; }
+
+  .alert-vol, .alert-premium, .alert-notional, .alert-voloi {
+    text-align: right;
+    font-size: 12px;
+    color: #bbb;
+  }
+
+  .alert-time {
+    font-size: 11px;
+    color: #555;
+    text-align: right;
+  }
+
+  .sweep-badge {
+    display: inline-block;
+    background: #e040fb22;
+    color: #e040fb;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    margin-left: 4px;
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: 80px 20px;
+    color: #555;
+  }
+
+  .empty-state h2 { font-size: 16px; margin-bottom: 8px; color: #888; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>OPTIONS FLOW SCANNER</h1>
+  <div class="status">
+    <span id="lastUpdate">Connecting...</span>
+    <div class="dot" id="statusDot"></div>
+  </div>
+</div>
+
+<div class="filters">
+  <label>Min Score:</label>
+  <select id="filterScore">
+    <option value="0">All</option>
+    <option value="4" selected>4+</option>
+    <option value="6">6+</option>
+    <option value="8">8+</option>
+  </select>
+  <label>Type:</label>
+  <select id="filterType">
+    <option value="all">All</option>
+    <option value="SWEEP">Sweeps</option>
+    <option value="LARGE_TRADE">Blocks</option>
+    <option value="LARGE_PUT_ACTIVITY_AT_SUPPORT">Put Activity</option>
+    <option value="UNUSUAL">Unusual Vol</option>
+  </select>
+  <label>Ticker:</label>
+  <input id="filterTicker" type="text" placeholder="e.g. AAPL" size="8">
+  <label>Date:</label>
+  <select id="filterDate"></select>
+</div>
+
+<div class="stats">
+  <div>Alerts: <span class="stat-val" id="statCount">0</span></div>
+  <div>Tickers: <span class="stat-val" id="statTickers">0</span></div>
+  <div>Sweeps: <span class="stat-val" id="statSweeps">0</span></div>
+  <div>Top Score: <span class="stat-val" id="statTopScore">—</span></div>
+</div>
+
+<div class="alerts-container" id="alertsContainer">
+  <div class="empty-state">
+    <h2>Waiting for alerts...</h2>
+    <p>Alerts will appear here in real-time when the scanner runs.</p>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://ylovbipfqhaktgqzifsx.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsb3ZiaXBmcWhha3RncXppZnN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEyNjQ0NjMsImV4cCI6MjA4Njg0MDQ2M30.-pL09_2YqgfqV-oHOn3eqVL7GIQKy9qOzbB5VV74gbE';
+
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let allAlerts = [];
+const container = document.getElementById('alertsContainer');
+const statusDot = document.getElementById('statusDot');
+const lastUpdate = document.getElementById('lastUpdate');
+
+function fmtCurrency(n) {
+  if (n == null) return '—';
+  if (Math.abs(n) >= 1e6) return '$' + (n / 1e6).toFixed(1) + 'M';
+  if (Math.abs(n) >= 1e3) return '$' + (n / 1e3).toFixed(0) + 'K';
+  return '$' + Number(n).toFixed(2);
+}
+
+function fmtNum(n) {
+  if (n == null) return '—';
+  return Number(n).toLocaleString();
+}
+
+function typeClass(type) {
+  if (type === 'SWEEP') return 'type-sweep';
+  if (type === 'LARGE_TRADE') return 'type-block';
+  if (type.includes('PUT_ACTIVITY') || type.includes('PUT_SALE')) return 'type-put';
+  if (type.includes('UNUSUAL')) return 'type-unusual';
+  return 'type-other';
+}
+
+function typeLabel(row) {
+  if (row.signal_type === 'SWEEP') {
+    const dir = row.direction === 'BUYER_SWEEP' ? 'BUYER ' : row.direction === 'SELLER_SWEEP' ? 'SELLER ' : '';
+    return dir + (row.contract_type || '').toUpperCase() + ' SWEEP';
+  }
+  if (row.signal_type === 'LARGE_TRADE') {
+    return (row.contract_type || '').toUpperCase() + ' BLOCK';
+  }
+  if (row.signal_type === 'LARGE_PUT_ACTIVITY_AT_SUPPORT') return 'PUT @ SUPPORT';
+  if (row.signal_type === 'UNUSUAL_CALL_VOLUME') return 'UNUSUAL CALL VOL';
+  if (row.signal_type === 'UNUSUAL_PUT_VOLUME') return 'UNUSUAL PUT VOL';
+  if (row.signal_type === 'RISK_REVERSAL') return 'RISK REVERSAL';
+  if (row.signal_type === 'REPEAT_FLOW') return 'REPEAT FLOW';
+  if (row.signal_type === 'OTM_CALL_BUY_THIN_NAME') return 'OTM CALL (THIN)';
+  return row.signal_type;
+}
+
+function dirClass(dir) {
+  if (!dir) return 'dir-unknown';
+  if (dir.includes('BUYER') || dir.includes('LIKELY_BUYER')) return 'dir-buyer';
+  if (dir.includes('SELLER') || dir.includes('LIKELY_SELLER')) return 'dir-seller';
+  return 'dir-unknown';
+}
+
+function dirLabel(dir) {
+  if (!dir || dir === 'UNKNOWN') return '—';
+  if (dir === 'BUYER_AGGRESSIVE' || dir === 'BUYER_SWEEP') return '↑↑ BUY';
+  if (dir === 'SELLER_AGGRESSIVE' || dir === 'SELLER_SWEEP') return '↓↓ SELL';
+  if (dir === 'LIKELY_BUYER') return '↑ BUY';
+  if (dir === 'LIKELY_SELLER') return '↓ SELL';
+  if (dir === 'MIXED') return '~ MIX';
+  return '—';
+}
+
+function scoreClass(score) {
+  if (score >= 8) return 'score-high';
+  if (score >= 5) return 'score-mid';
+  return 'score-low';
+}
+
+function timeStr(ts) {
+  const d = new Date(ts);
+  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'America/New_York' });
+}
+
+function renderAlert(row, isNew) {
+  const sc = scoreClass(row.score);
+  const contract = row.strike
+    ? `${row.strike}${row.contract_type === 'call' ? 'C' : row.contract_type === 'put' ? 'P' : ''} ${row.expiry || ''}`
+    : '';
+  const sweepMeta = row.is_sweep
+    ? `<span class="sweep-badge">${row.sweep_fills}f / ${row.sweep_exchanges}ex / ${row.sweep_duration_ms}ms</span>`
+    : '';
+
+  return `<div class="alert-row ${sc}${isNew ? ' new-alert' : ''}" data-id="${row.id}">
+    <div class="alert-score">${row.score}</div>
+    <div class="alert-ticker">${row.ticker}</div>
+    <div class="alert-detail">
+      <div class="alert-type ${typeClass(row.signal_type)}">${typeLabel(row)}${sweepMeta}</div>
+      <div class="alert-contract">${contract}${row.stock_price ? ' @ $' + Number(row.stock_price).toFixed(2) : ''}</div>
+    </div>
+    <div class="alert-dir ${dirClass(row.direction)}">${dirLabel(row.direction)}</div>
+    <div class="alert-vol">${fmtNum(row.volume)}</div>
+    <div class="alert-premium">${row.premium != null ? '$' + Number(row.premium).toFixed(2) : '—'}</div>
+    <div class="alert-notional">${fmtCurrency(row.notional)}</div>
+    <div class="alert-voloi">${row.vol_oi_ratio != null ? Number(row.vol_oi_ratio).toFixed(1) + 'x' : '—'}</div>
+  </div>`;
+}
+
+function getFilters() {
+  return {
+    minScore: parseInt(document.getElementById('filterScore').value),
+    type: document.getElementById('filterType').value,
+    ticker: document.getElementById('filterTicker').value.toUpperCase().trim(),
+    date: document.getElementById('filterDate').value,
+  };
+}
+
+function applyFilters(alerts) {
+  const f = getFilters();
+  return alerts.filter(a => {
+    if (a.score < f.minScore) return false;
+    if (f.type !== 'all') {
+      if (f.type === 'UNUSUAL') {
+        if (!a.signal_type.includes('UNUSUAL')) return false;
+      } else if (a.signal_type !== f.type) return false;
+    }
+    if (f.ticker && a.ticker !== f.ticker) return false;
+    if (f.date && a.scan_date !== f.date) return false;
+    return true;
+  });
+}
+
+function renderAll() {
+  const filtered = applyFilters(allAlerts);
+  if (filtered.length === 0) {
+    container.innerHTML = `<div class="empty-state"><h2>No alerts match filters</h2><p>Try adjusting your filters above.</p></div>`;
+  } else {
+    container.innerHTML = filtered.map(a => renderAlert(a, false)).join('');
+  }
+  updateStats(filtered);
+}
+
+function updateStats(filtered) {
+  document.getElementById('statCount').textContent = filtered.length;
+  document.getElementById('statTickers').textContent = new Set(filtered.map(a => a.ticker)).size;
+  document.getElementById('statSweeps').textContent = filtered.filter(a => a.is_sweep).length;
+  const top = filtered.length ? Math.max(...filtered.map(a => a.score)) : 0;
+  document.getElementById('statTopScore').textContent = top || '—';
+}
+
+function updateDateFilter() {
+  const dates = [...new Set(allAlerts.map(a => a.scan_date))].sort().reverse();
+  const sel = document.getElementById('filterDate');
+  const current = sel.value;
+  sel.innerHTML = '<option value="">All dates</option>' + dates.map(d =>
+    `<option value="${d}"${d === current ? ' selected' : ''}>${d}</option>`
+  ).join('');
+}
+
+function flashDot() {
+  statusDot.classList.add('flash');
+  setTimeout(() => statusDot.classList.remove('flash'), 1000);
+}
+
+// Load existing alerts
+async function loadAlerts() {
+  const { data, error } = await supabase
+    .from('alerts')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(500);
+
+  if (error) {
+    console.error('Load error:', error);
+    lastUpdate.textContent = 'Error loading';
+    return;
+  }
+
+  allAlerts = data || [];
+  updateDateFilter();
+  renderAll();
+  lastUpdate.textContent = `${allAlerts.length} alerts loaded`;
+  statusDot.classList.add('connected');
+}
+
+// Subscribe to realtime inserts
+function subscribeRealtime() {
+  supabase
+    .channel('alerts-realtime')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'alerts' }, (payload) => {
+      const row = payload.new;
+      allAlerts.unshift(row);
+      updateDateFilter();
+
+      const filtered = applyFilters([row]);
+      if (filtered.length > 0) {
+        // Remove empty state if present
+        const empty = container.querySelector('.empty-state');
+        if (empty) empty.remove();
+        container.insertAdjacentHTML('afterbegin', renderAlert(row, true));
+        updateStats(applyFilters(allAlerts));
+
+        // Clear new-alert highlight after 5s
+        setTimeout(() => {
+          const el = container.querySelector(`[data-id="${row.id}"]`);
+          if (el) el.classList.remove('new-alert');
+        }, 5000);
+      }
+
+      flashDot();
+      lastUpdate.textContent = `Last: ${row.ticker} ${typeLabel(row)} — ${timeStr(row.created_at)}`;
+
+      // Play notification sound for high scores
+      if (row.score >= 8) {
+        try { new Audio('data:audio/wav;base64,UklGRl9vT19teleXBltfQ==').play().catch(() => {}); } catch {}
+      }
+    })
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        statusDot.classList.add('connected');
+        lastUpdate.textContent = lastUpdate.textContent || 'Connected — waiting for alerts';
+      }
+    });
+}
+
+// Filter event listeners
+document.getElementById('filterScore').addEventListener('change', renderAll);
+document.getElementById('filterType').addEventListener('change', renderAll);
+document.getElementById('filterTicker').addEventListener('input', renderAll);
+document.getElementById('filterDate').addEventListener('change', renderAll);
+
+// Init
+loadAlerts().then(() => subscribeRealtime());
+</script>
+</body>
+</html>
