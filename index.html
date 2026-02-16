@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Options Flow Scanner</title>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -251,14 +251,11 @@
 const SUPABASE_URL = 'https://ylovbipfqhaktgqzifsx.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsb3ZiaXBmcWhha3RncXppZnN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEyNjQ0NjMsImV4cCI6MjA4Njg0MDQ2M30.-pL09_2YqgfqV-oHOn3eqVL7GIQKy9qOzbB5VV74gbE';
 
-let supabaseClient;
-try {
-  supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-} catch (e) {
-  document.getElementById('lastUpdate').textContent = 'Error: Supabase library failed to load';
-  console.error('Supabase init error:', e);
-}
-const supabase = supabaseClient;
+const HEADERS = { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY };
+const REST_URL = SUPABASE_URL + '/rest/v1/alerts';
+
+let sb = null;
+try { sb = window.supabase && window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY); } catch(e) { console.warn('Supabase client failed, using REST fallback'); }
 
 let allAlerts = [];
 const container = document.getElementById('alertsContainer');
@@ -410,65 +407,72 @@ function flashDot() {
   setTimeout(() => statusDot.classList.remove('flash'), 1000);
 }
 
-// Load existing alerts
+// Load alerts via REST (no library dependency)
 async function loadAlerts() {
-  const { data, error } = await supabase
-    .from('alerts')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(500);
-
-  if (error) {
-    console.error('Load error:', error);
-    lastUpdate.textContent = 'Error: ' + (error.message || JSON.stringify(error));
-    return;
+  try {
+    const res = await fetch(REST_URL + '?select=*&order=created_at.desc&limit=500', { headers: HEADERS });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    allAlerts = await res.json();
+    updateDateFilter();
+    renderAll();
+    lastUpdate.textContent = allAlerts.length + ' alerts loaded';
+    statusDot.classList.add('connected');
+  } catch (e) {
+    console.error('Load error:', e);
+    lastUpdate.textContent = 'Error: ' + e.message;
   }
-
-  allAlerts = data || [];
-  updateDateFilter();
-  renderAll();
-  lastUpdate.textContent = `${allAlerts.length} alerts loaded`;
-  statusDot.classList.add('connected');
 }
 
-// Subscribe to realtime inserts
-function subscribeRealtime() {
-  supabase
-    .channel('alerts-realtime')
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'alerts' }, (payload) => {
-      const row = payload.new;
-      allAlerts.unshift(row);
-      updateDateFilter();
+// Real-time: use Supabase client if available, otherwise poll every 10s
+let lastSeenId = 0;
 
-      const filtered = applyFilters([row]);
-      if (filtered.length > 0) {
-        // Remove empty state if present
-        const empty = container.querySelector('.empty-state');
-        if (empty) empty.remove();
-        container.insertAdjacentHTML('afterbegin', renderAlert(row, true));
-        updateStats(applyFilters(allAlerts));
+function startRealtime() {
+  if (sb) {
+    sb.channel('alerts-realtime')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'alerts' }, (payload) => {
+        handleNewAlert(payload.new);
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          statusDot.classList.add('connected');
+          console.log('Realtime connected');
+        }
+      });
+  } else {
+    // Polling fallback
+    setInterval(pollForNew, 10000);
+  }
+}
 
-        // Clear new-alert highlight after 5s
-        setTimeout(() => {
-          const el = container.querySelector(`[data-id="${row.id}"]`);
-          if (el) el.classList.remove('new-alert');
-        }, 5000);
-      }
+async function pollForNew() {
+  try {
+    const maxId = allAlerts.length ? Math.max(...allAlerts.map(a => a.id)) : 0;
+    const res = await fetch(REST_URL + '?select=*&id=gt.' + maxId + '&order=created_at.desc', { headers: HEADERS });
+    if (!res.ok) return;
+    const newRows = await res.json();
+    for (const row of newRows.reverse()) handleNewAlert(row);
+  } catch(e) { console.warn('Poll error:', e); }
+}
 
-      flashDot();
-      lastUpdate.textContent = `Last: ${row.ticker} ${typeLabel(row)} — ${timeStr(row.created_at)}`;
+function handleNewAlert(row) {
+  if (allAlerts.some(a => a.id === row.id)) return; // dedup
+  allAlerts.unshift(row);
+  updateDateFilter();
 
-      // Play notification sound for high scores
-      if (row.score >= 8) {
-        try { new Audio('data:audio/wav;base64,UklGRl9vT19teleXBltfQ==').play().catch(() => {}); } catch {}
-      }
-    })
-    .subscribe((status) => {
-      if (status === 'SUBSCRIBED') {
-        statusDot.classList.add('connected');
-        lastUpdate.textContent = lastUpdate.textContent || 'Connected — waiting for alerts';
-      }
-    });
+  const filtered = applyFilters([row]);
+  if (filtered.length > 0) {
+    const empty = container.querySelector('.empty-state');
+    if (empty) empty.remove();
+    container.insertAdjacentHTML('afterbegin', renderAlert(row, true));
+    updateStats(applyFilters(allAlerts));
+    setTimeout(() => {
+      const el = container.querySelector('[data-id="' + row.id + '"]');
+      if (el) el.classList.remove('new-alert');
+    }, 5000);
+  }
+
+  flashDot();
+  lastUpdate.textContent = 'Last: ' + row.ticker + ' ' + typeLabel(row) + ' — ' + timeStr(row.created_at);
 }
 
 // Filter event listeners
@@ -478,16 +482,7 @@ document.getElementById('filterTicker').addEventListener('input', renderAll);
 document.getElementById('filterDate').addEventListener('change', renderAll);
 
 // Init
-if (supabase) {
-  loadAlerts()
-    .then(() => subscribeRealtime())
-    .catch(e => {
-      console.error('Init error:', e);
-      lastUpdate.textContent = 'Error: ' + e.message;
-    });
-} else {
-  lastUpdate.textContent = 'Error: Supabase not loaded — check console';
-}
+loadAlerts().then(() => startRealtime());
 </script>
 </body>
 </html>
