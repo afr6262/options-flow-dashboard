@@ -119,7 +119,11 @@
     font-size: 10px; font-weight: 600; color: #848e9c;
     text-transform: uppercase; letter-spacing: 0.4px;
     padding: 0 4px; white-space: nowrap;
+    cursor: pointer; user-select: none;
   }
+
+  .table-header .th:hover { color: #eaecef; }
+  .table-header .th.sorted { color: #f0b90b; }
 
   .table-header .th.r { text-align: right; }
   .table-header .th.c { text-align: center; }
@@ -252,7 +256,9 @@
       <select id="filterType">
         <option value="all">All</option>
         <option value="SWEEP">Sweeps</option>
-        <option value="LARGE_TRADE">Blocks</option>
+        <option value="LARGE_TRADE">Blocks (Agg.)</option>
+        <option value="BLOCK_TRADE">Block Trades</option>
+        <option value="PUT_SALE">Put Sales</option>
         <option value="LARGE_PUT_ACTIVITY_AT_SUPPORT">Put @ Support</option>
         <option value="UNUSUAL">Unusual Vol</option>
       </select>
@@ -285,22 +291,22 @@
 <div class="table-wrap">
 <div class="flow-table">
   <div class="table-header grid-cols">
-    <div class="th">Time</div>
-    <div class="th">Ticker</div>
-    <div class="th c">Side</div>
+    <div class="th sorted" data-sort="time" data-dir="desc">Time ▼</div>
+    <div class="th" data-sort="ticker">Ticker</div>
+    <div class="th c" data-sort="side">Side</div>
     <div class="th c">Bid/Ask</div>
     <div class="th">Contract</div>
-    <div class="th r">DTE</div>
-    <div class="th r">Stock</div>
-    <div class="th r">Spot</div>
-    <div class="th r">% OTM</div>
-    <div class="th r">Size</div>
-    <div class="th r">Premium</div>
+    <div class="th r" data-sort="dte">DTE</div>
+    <div class="th r" data-sort="stock">Stock</div>
+    <div class="th r" data-sort="spot">Spot</div>
+    <div class="th r" data-sort="otm">% OTM</div>
+    <div class="th r" data-sort="size">Size</div>
+    <div class="th r" data-sort="notional">Premium</div>
     <div class="th r">B/A Prem</div>
-    <div class="th r">🐻/🐂</div>
-    <div class="th r">Volume</div>
-    <div class="th r">OI</div>
-    <div class="th r">Vol/OI</div>
+    <div class="th r" data-sort="score">Score</div>
+    <div class="th r" data-sort="volume">Volume</div>
+    <div class="th r" data-sort="oi">OI</div>
+    <div class="th r" data-sort="voi">Vol/OI</div>
     <div class="th r">IV Chg</div>
   </div>
 
@@ -370,8 +376,11 @@ function calcOTM(row) {
 
 function typeTag(row) {
   const t = row.signal_type;
+  const floor = row.raw_signal && row.raw_signal.isFloorTrade ? ' <span style="color:#f0b90b;font-size:8px">FLOOR</span>' : '';
   if (t === 'SWEEP') return '<span class="type-tag tag-sweep">SWEEP</span>';
-  if (t === 'LARGE_TRADE') return '<span class="type-tag tag-block">BLOCK</span>';
+  if (t === 'LARGE_TRADE') return '<span class="type-tag tag-block">BLOCK</span>' + floor;
+  if (t === 'BLOCK_TRADE') return '<span class="type-tag tag-block">BLK TRADE</span>' + floor;
+  if (t === 'PUT_SALE') return '<span class="type-tag" style="color:#0ecb81">PUT SALE</span>' + floor;
   if (t === 'LARGE_PUT_ACTIVITY_AT_SUPPORT') return '<span class="type-tag tag-put-sup">PUT@SUP</span>';
   if (t.includes('UNUSUAL')) return '<span class="type-tag tag-unusual">UNUSUAL</span>';
   if (t === 'REPEAT_FLOW') return '<span class="type-tag tag-other">REPEAT</span>';
@@ -385,13 +394,26 @@ function sidePill(ct) {
   return '<span class="side-pill" style="color:#474d57">—</span>';
 }
 
-function baPill(dir) {
+function baPill(row) {
+  // Use granular spreadPosition from raw_signal if available
+  const sp = row.raw_signal && row.raw_signal.spreadPosition;
+  if (sp && sp !== 'UNKNOWN') {
+    if (sp === 'ABOVE_ASK') return '<span class="ba-pill ba-ask" style="font-size:9px">ABV ASK</span>';
+    if (sp === 'AT_ASK') return '<span class="ba-pill ba-ask">AT ASK</span>';
+    if (sp === 'NEAR_ASK') return '<span class="ba-pill ba-ask" style="opacity:0.7;font-size:9px">NR ASK</span>';
+    if (sp === 'AT_MID') return '<span class="ba-pill ba-ask" style="opacity:0.5;font-size:9px">NR ASK</span>';
+    if (sp === 'NEAR_BID') return '<span class="ba-pill ba-bid" style="opacity:0.7;font-size:9px">NR BID</span>';
+    if (sp === 'AT_BID') return '<span class="ba-pill ba-bid">AT BID</span>';
+    if (sp === 'BELOW_BID') return '<span class="ba-pill ba-bid" style="font-size:9px">BLW BID</span>';
+  }
+  // Fallback to direction field
+  const dir = row.direction;
   if (!dir || dir === 'UNKNOWN') return '<span class="ba-pill ba-none">—</span>';
-  if (dir === 'BUYER_AGGRESSIVE' || dir === 'BUYER_SWEEP') return '<span class="ba-pill ba-ask">ASK</span>';
-  if (dir === 'SELLER_AGGRESSIVE' || dir === 'SELLER_SWEEP') return '<span class="ba-pill ba-bid">BID</span>';
-  if (dir === 'LIKELY_BUYER') return '<span class="ba-pill ba-ask" style="opacity:0.7">ASK</span>';
-  if (dir === 'LIKELY_SELLER') return '<span class="ba-pill ba-bid" style="opacity:0.7">BID</span>';
-  if (dir === 'MIXED') return '<span class="ba-pill ba-mid">MID</span>';
+  if (dir === 'BOUGHT' || dir === 'BUYER_AGGRESSIVE' || dir === 'BUYER_SWEEP') return '<span class="ba-pill ba-ask">AT ASK</span>';
+  if (dir === 'SOLD' || dir === 'SELLER_AGGRESSIVE' || dir === 'SELLER_SWEEP') return '<span class="ba-pill ba-bid">AT BID</span>';
+  if (dir === 'LIKELY_BUYER') return '<span class="ba-pill ba-ask" style="opacity:0.7;font-size:9px">NR ASK</span>';
+  if (dir === 'LIKELY_SELLER') return '<span class="ba-pill ba-bid" style="opacity:0.7;font-size:9px">NR BID</span>';
+  if (dir === 'MIXED') return '<span class="ba-pill ba-none">—</span>';
   return '<span class="ba-pill ba-none">—</span>';
 }
 
@@ -408,6 +430,44 @@ function scoreRowClass(s) {
   return 'sc-low';
 }
 
+/* ── Sorting ── */
+let sortCol = 'time';
+let sortDir = 'desc';
+
+function getTradeTime(row) {
+  return row.trade_time || (row.raw_signal && row.raw_signal.tradeTime) || '';
+}
+
+function getSortVal(row, col) {
+  switch (col) {
+    case 'time': return getTradeTime(row) || timeStr(row.created_at) || '';
+    case 'ticker': return row.ticker || '';
+    case 'side': return row.contract_type || '';
+    case 'dte': return calcDTE(row.expiry) === '—' ? 9999 : calcDTE(row.expiry);
+    case 'stock': return Number(row.stock_price) || 0;
+    case 'spot': return Number(row.premium) || 0;
+    case 'otm': { const o = calcOTM(row); return o.pct != null ? o.pct : -1; }
+    case 'size': return Number(row.volume) || 0;
+    case 'notional': return Number(row.notional) || 0;
+    case 'score': return Number(row.score) || 0;
+    case 'volume': return Number(row.volume) || 0;
+    case 'oi': return Number(row.open_interest) || 0;
+    case 'voi': return Number(row.vol_oi_ratio) || 0;
+    default: return 0;
+  }
+}
+
+function sortAlerts(alerts) {
+  return [...alerts].sort((a, b) => {
+    let va = getSortVal(a, sortCol), vb = getSortVal(b, sortCol);
+    if (typeof va === 'string') {
+      const cmp = va.localeCompare(vb);
+      return sortDir === 'asc' ? cmp : -cmp;
+    }
+    return sortDir === 'asc' ? va - vb : vb - va;
+  });
+}
+
 /* ── Render ── */
 function renderRow(row, isNew) {
   const otm = calcOTM(row);
@@ -416,12 +476,13 @@ function renderRow(row, isNew) {
     ? `${row.strike}${row.contract_type === 'call' ? 'C' : row.contract_type === 'put' ? 'P' : ''}`
     : '—';
   const expiryShort = row.expiry ? row.expiry.substring(5) : '';
+  const displayTime = getTradeTime(row) || timeStr(row.created_at);
 
   return `<div class="flow-row grid-cols ${scoreRowClass(row.score)}${isNew ? ' new-row' : ''}" data-id="${row.id}">
-    <div class="c c-time">${timeStr(row.created_at)}</div>
+    <div class="c c-time">${displayTime}</div>
     <div class="c c-ticker">${row.ticker}${typeTag(row)}</div>
     <div class="c c-side">${sidePill(row.contract_type)}</div>
-    <div class="c c-bidask">${baPill(row.direction)}</div>
+    <div class="c c-bidask">${baPill(row)}</div>
     <div class="c c-contract">${strike}<span class="exp">${expiryShort}</span></div>
     <div class="c c-num muted">${dte}</div>
     <div class="c c-num">${row.stock_price ? '$' + Number(row.stock_price).toFixed(2) : '—'}</div>
@@ -429,8 +490,8 @@ function renderRow(row, isNew) {
     <div class="c c-num ${otm.cls}">${otm.label}</div>
     <div class="c c-num">${fmtNum(row.volume)}</div>
     <div class="c c-num">${fmtCurrency(row.notional)}</div>
-    <div class="c c-num dim">—</div>
-    <div class="c c-num dim">—</div>
+    <div class="c c-num muted">${row.raw_signal && row.raw_signal.quoteBid != null ? '$' + Number(row.raw_signal.quoteBid).toFixed(2) + '/' + Number(row.raw_signal.quoteAsk).toFixed(2) : '—'}</div>
+    <div class="c c-num">${row.score}</div>
     <div class="c c-num muted">${fmtNum(row.volume)}</div>
     <div class="c c-num muted">${fmtNum(row.open_interest)}</div>
     <div class="c c-num ${voiClass(row.vol_oi_ratio)}">${row.vol_oi_ratio != null ? Number(row.vol_oi_ratio).toFixed(1) + 'x' : '—'}</div>
@@ -465,7 +526,7 @@ function applyFilters(alerts) {
 }
 
 function renderAll() {
-  const filtered = applyFilters(allAlerts);
+  const filtered = sortAlerts(applyFilters(allAlerts));
   if (filtered.length === 0) {
     tableBody.innerHTML = '<div class="empty-state"><h2>No alerts match filters</h2><p>Adjust filters above.</p></div>';
   } else {
@@ -482,27 +543,47 @@ function updateStats(filtered) {
   document.getElementById('statTopScore').textContent = top || '—';
 }
 
-function updateDateFilter() {
-  const dates = [...new Set(allAlerts.map(a => a.scan_date))].sort().reverse();
+function updateDateFilter(dates, defaultDate) {
   const sel = document.getElementById('filterDate');
-  const cur = sel.value;
+  const cur = sel.value || defaultDate || '';
   sel.innerHTML = '<option value="">All</option>' + dates.map(d =>
     `<option value="${d}"${d === cur ? ' selected' : ''}>${d}</option>`
   ).join('');
+  if (cur && !sel.value) sel.value = cur;
 }
 
 /* ── Data loading ── */
-async function loadAlerts() {
+function getTodayET() {
+  return new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }))
+    .toISOString().slice(0, 10);
+}
+
+async function loadAlerts(date) {
   try {
-    const res = await fetch(REST_URL + '?select=*&order=created_at.desc&limit=500', { headers: HEADERS });
+    const dateFilter = date ? '&scan_date=eq.' + date : '';
+    const res = await fetch(REST_URL + '?select=*' + dateFilter + '&order=trade_time.desc.nullslast,created_at.desc&limit=500', { headers: HEADERS });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     allAlerts = await res.json();
-    updateDateFilter();
     renderAll();
     lastUpdate.textContent = allAlerts.length + ' alerts loaded';
   } catch (e) {
     lastUpdate.textContent = 'Error: ' + e.message;
   }
+}
+
+async function loadAvailableDates() {
+  try {
+    const res = await fetch(REST_URL + '?select=scan_date&order=scan_date.desc&limit=1000', { headers: HEADERS });
+    if (!res.ok) return [];
+    const rows = await res.json();
+    return [...new Set(rows.map(r => r.scan_date))].sort().reverse();
+  } catch(e) { return []; }
+}
+
+async function onDateChange() {
+  const sel = document.getElementById('filterDate');
+  const date = sel.value;
+  await loadAlerts(date || null);
 }
 
 function startRealtime() {
@@ -517,8 +598,9 @@ function startRealtime() {
 
 async function pollForNew() {
   try {
+    const today = getTodayET();
     const maxId = allAlerts.length ? Math.max(...allAlerts.map(a => a.id)) : 0;
-    const res = await fetch(REST_URL + '?select=*&id=gt.' + maxId + '&order=created_at.desc', { headers: HEADERS });
+    const res = await fetch(REST_URL + '?select=*&id=gt.' + maxId + '&scan_date=eq.' + today + '&order=created_at.desc', { headers: HEADERS });
     if (!res.ok) return;
     const rows = await res.json();
     for (const r of rows.reverse()) handleNewAlert(r);
@@ -527,19 +609,27 @@ async function pollForNew() {
 
 function handleNewAlert(row) {
   if (allAlerts.some(a => a.id === row.id)) return;
+
+  // Only add to view if it matches selected date (or "All" is selected)
+  const selectedDate = document.getElementById('filterDate').value;
+  if (selectedDate && row.scan_date !== selectedDate) return;
+
   allAlerts.unshift(row);
-  updateDateFilter();
-  const filtered = applyFilters([row]);
-  if (filtered.length > 0) {
-    const empty = tableBody.querySelector('.empty-state');
-    if (empty) empty.remove();
-    tableBody.insertAdjacentHTML('afterbegin', renderRow(row, true));
-    updateStats(applyFilters(allAlerts));
-    setTimeout(() => {
-      const el = tableBody.querySelector('[data-id="' + row.id + '"]');
-      if (el) el.classList.remove('new-row');
-    }, 4000);
+  // Add new date to dropdown if not already present
+  const sel = document.getElementById('filterDate');
+  if (row.scan_date && ![...sel.options].some(o => o.value === row.scan_date)) {
+    const opt = document.createElement('option');
+    opt.value = row.scan_date;
+    opt.textContent = row.scan_date;
+    sel.insertBefore(opt, sel.options[1]); // after "All"
   }
+  // Re-render full table to maintain sort order
+  renderAll();
+  // Highlight the new row briefly
+  setTimeout(() => {
+    const el = tableBody.querySelector('[data-id="' + row.id + '"]');
+    if (el) { el.classList.add('new-row'); setTimeout(() => el.classList.remove('new-row'), 4000); }
+  }, 50);
   lastUpdate.textContent = row.ticker + ' ' + (row.contract_type||'').toUpperCase() + ' ' + (row.strike||'') + ' (' + row.score + ')';
 }
 
@@ -548,9 +638,36 @@ document.getElementById('filterScore').addEventListener('change', renderAll);
 document.getElementById('filterType').addEventListener('change', renderAll);
 document.getElementById('filterSide').addEventListener('change', renderAll);
 document.getElementById('filterTicker').addEventListener('input', renderAll);
-document.getElementById('filterDate').addEventListener('change', renderAll);
+document.getElementById('filterDate').addEventListener('change', onDateChange);
 
-loadAlerts().then(() => startRealtime());
+// Sortable headers
+document.querySelectorAll('.th[data-sort]').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.sort;
+    if (sortCol === col) {
+      sortDir = sortDir === 'desc' ? 'asc' : 'desc';
+    } else {
+      sortCol = col;
+      sortDir = 'desc';
+    }
+    // Update header labels
+    document.querySelectorAll('.th[data-sort]').forEach(h => {
+      h.classList.remove('sorted');
+      h.textContent = h.textContent.replace(/ [▲▼]$/, '');
+    });
+    th.classList.add('sorted');
+    th.textContent += sortDir === 'desc' ? ' ▼' : ' ▲';
+    renderAll();
+  });
+});
+
+(async () => {
+  const today = getTodayET();
+  const dates = await loadAvailableDates();
+  updateDateFilter(dates, today);
+  await loadAlerts(today);
+  startRealtime();
+})();
 </script>
 </body>
 </html>
